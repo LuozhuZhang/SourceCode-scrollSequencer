@@ -21,9 +21,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/common"
 	"golang.org/x/crypto/sha3"
-
-	"github.com/scroll-tech/go-ethereum/common"
 )
 
 // Genesis hashes to enforce below configs on.

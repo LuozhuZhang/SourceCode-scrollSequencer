@@ -28,25 +28,23 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/mclock"
+	"github.com/ethereum/go-ethereum/common/prque"
+	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/state/snapshot"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/internal/syncx"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/trie"
 	lru "github.com/hashicorp/golang-lru"
-
-	"github.com/scroll-tech/go-ethereum/common"
-	"github.com/scroll-tech/go-ethereum/common/hexutil"
-	"github.com/scroll-tech/go-ethereum/common/mclock"
-	"github.com/scroll-tech/go-ethereum/common/prque"
-	"github.com/scroll-tech/go-ethereum/consensus"
-	"github.com/scroll-tech/go-ethereum/core/rawdb"
-	"github.com/scroll-tech/go-ethereum/core/state"
-	"github.com/scroll-tech/go-ethereum/core/state/snapshot"
-	"github.com/scroll-tech/go-ethereum/core/types"
-	"github.com/scroll-tech/go-ethereum/core/vm"
-	"github.com/scroll-tech/go-ethereum/ethdb"
-	"github.com/scroll-tech/go-ethereum/event"
-	"github.com/scroll-tech/go-ethereum/internal/syncx"
-	"github.com/scroll-tech/go-ethereum/log"
-	"github.com/scroll-tech/go-ethereum/metrics"
-	"github.com/scroll-tech/go-ethereum/params"
-	"github.com/scroll-tech/go-ethereum/trie"
 )
 
 var (
@@ -86,14 +84,13 @@ var (
 )
 
 const (
-	bodyCacheLimit        = 256
-	blockCacheLimit       = 256
-	receiptsCacheLimit    = 32
-	txLookupCacheLimit    = 1024
-	maxFutureBlocks       = 256
-	maxTimeFutureBlocks   = 30
-	TriesInMemory         = 128
-	blockResultCacheLimit = 128
+	bodyCacheLimit      = 256
+	blockCacheLimit     = 256
+	receiptsCacheLimit  = 32
+	txLookupCacheLimit  = 1024
+	maxFutureBlocks     = 256
+	maxTimeFutureBlocks = 30
+	TriesInMemory       = 128
 
 	// BlockChainVersion ensures that an incompatible database forces a resync from scratch.
 	//
@@ -194,14 +191,13 @@ type BlockChain struct {
 	currentBlock     atomic.Value // Current head of the block chain
 	currentFastBlock atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
 
-	stateCache       state.Database // State database to reuse between imports (contains state cache)
-	bodyCache        *lru.Cache     // Cache for the most recent block bodies
-	bodyRLPCache     *lru.Cache     // Cache for the most recent block bodies in RLP encoded format
-	receiptsCache    *lru.Cache     // Cache for the most recent receipts per block
-	blockCache       *lru.Cache     // Cache for the most recent entire blocks
-	txLookupCache    *lru.Cache     // Cache for the most recent transaction lookup data.
-	futureBlocks     *lru.Cache     // future blocks are blocks added for later processing
-	blockResultCache *lru.Cache     // Cache for the most recent block results.
+	stateCache    state.Database // State database to reuse between imports (contains state cache)
+	bodyCache     *lru.Cache     // Cache for the most recent block bodies
+	bodyRLPCache  *lru.Cache     // Cache for the most recent block bodies in RLP encoded format
+	receiptsCache *lru.Cache     // Cache for the most recent receipts per block
+	blockCache    *lru.Cache     // Cache for the most recent entire blocks
+	txLookupCache *lru.Cache     // Cache for the most recent transaction lookup data.
+	futureBlocks  *lru.Cache     // future blocks are blocks added for later processing
 
 	wg            sync.WaitGroup //
 	quit          chan struct{}  // shutdown signal, closed in Stop.
@@ -230,7 +226,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	blockCache, _ := lru.New(blockCacheLimit)
 	txLookupCache, _ := lru.New(txLookupCacheLimit)
 	futureBlocks, _ := lru.New(maxFutureBlocks)
-	blockResultCache, _ := lru.New(blockResultCacheLimit)
 
 	bc := &BlockChain{
 		chainConfig: chainConfig,
@@ -242,18 +237,17 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 			Journal:   cacheConfig.TrieCleanJournal,
 			Preimages: cacheConfig.Preimages,
 		}),
-		quit:             make(chan struct{}),
-		chainmu:          syncx.NewClosableMutex(),
-		shouldPreserve:   shouldPreserve,
-		bodyCache:        bodyCache,
-		bodyRLPCache:     bodyRLPCache,
-		receiptsCache:    receiptsCache,
-		blockCache:       blockCache,
-		txLookupCache:    txLookupCache,
-		futureBlocks:     futureBlocks,
-		blockResultCache: blockResultCache,
-		engine:           engine,
-		vmConfig:         vmConfig,
+		quit:           make(chan struct{}),
+		chainmu:        syncx.NewClosableMutex(),
+		shouldPreserve: shouldPreserve,
+		bodyCache:      bodyCache,
+		bodyRLPCache:   bodyRLPCache,
+		receiptsCache:  receiptsCache,
+		blockCache:     blockCache,
+		txLookupCache:  txLookupCache,
+		futureBlocks:   futureBlocks,
+		engine:         engine,
+		vmConfig:       vmConfig,
 	}
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
@@ -1188,17 +1182,17 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 }
 
 // WriteBlockWithState writes the block and all associated state to the database.
-func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.Receipt, logs []*types.Log, evmTraces []*types.ExecutionResult, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
+func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
 	if !bc.chainmu.TryLock() {
 		return NonStatTy, errInsertionInterrupted
 	}
 	defer bc.chainmu.Unlock()
-	return bc.writeBlockWithState(block, receipts, logs, evmTraces, state, emitHeadEvent)
+	return bc.writeBlockWithState(block, receipts, logs, state, emitHeadEvent)
 }
 
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
-func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, logs []*types.Log, evmTraces []*types.ExecutionResult, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
+func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
 	if bc.insertStopped() {
 		return NonStatTy, errInsertionInterrupted
 	}
@@ -1319,15 +1313,8 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	}
 	bc.futureBlocks.Remove(block.Hash())
 
-	// Fill blockResult content
-	var blockResult *types.BlockResult
-	if evmTraces != nil {
-		blockResult = bc.writeBlockResult(state, block, evmTraces)
-		bc.blockResultCache.Add(block.Hash(), blockResult)
-	}
-
 	if status == CanonStatTy {
-		bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs, BlockResult: blockResult})
+		bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
 		if len(logs) > 0 {
 			bc.logsFeed.Send(logs)
 		}
@@ -1343,57 +1330,6 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 	}
 	return status, nil
-}
-
-// Fill blockResult content
-func (bc *BlockChain) writeBlockResult(state *state.StateDB, block *types.Block, evmTraces []*types.ExecutionResult) *types.BlockResult {
-	blockResult := &types.BlockResult{
-		ExecutionResults: evmTraces,
-	}
-	coinbase := types.AccountProofWrapper{
-		Address:  block.Coinbase(),
-		Nonce:    state.GetNonce(block.Coinbase()),
-		Balance:  (*hexutil.Big)(state.GetBalance(block.Coinbase())),
-		CodeHash: state.GetCodeHash(block.Coinbase()),
-	}
-	// Get coinbase address's account proof.
-	proof, err := state.GetProof(block.Coinbase())
-	if err != nil {
-		log.Error("Failed to get proof", "blockNumber", block.NumberU64(), "address", block.Coinbase().String(), "err", err)
-	} else {
-		coinbase.Proof = make([]string, len(proof))
-		for i := range proof {
-			coinbase.Proof[i] = hexutil.Encode(proof[i])
-		}
-	}
-
-	blockResult.BlockTrace = types.NewTraceBlock(bc.chainConfig, block, &coinbase)
-	for i, tx := range block.Transactions() {
-		evmTrace := blockResult.ExecutionResults[i]
-		from := evmTrace.Sender.Address
-
-		// Get proof
-		proof, err := state.GetProof(from)
-		if err != nil {
-			log.Error("Failed to get proof", "blockNumber", block.NumberU64(), "address", from.String(), "err", err)
-		} else {
-			evmTrace.Sender.Proof = make([]string, len(proof))
-			for i := range proof {
-				evmTrace.Sender.Proof[i] = hexutil.Encode(proof[i])
-			}
-		}
-
-		// Contract is called
-		if len(tx.Data()) != 0 && tx.To() != nil {
-			evmTrace.ByteCode = hexutil.Encode(state.GetCode(*tx.To()))
-			// Get tx.to address's code hash.
-			codeHash := state.GetCodeHash(*tx.To())
-			evmTrace.CodeHash = &codeHash
-		} else if tx.To() == nil { // Contract is created.
-			evmTrace.ByteCode = hexutil.Encode(tx.Data())
-		}
-	}
-	return blockResult
 }
 
 // addFutureBlock checks if the block is within the max allowed window to get
@@ -1708,8 +1644,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 
 		// Write the block to the chain and get the status.
 		substart = time.Now()
-		// EvmTraces is nil is safe because l2geth's p2p server is stoped and the code will not execute there.
-		status, err := bc.writeBlockWithState(block, receipts, logs, nil, statedb, false)
+		status, err := bc.writeBlockWithState(block, receipts, logs, statedb, false)
 		atomic.StoreUint32(&followupInterrupt, 1)
 		if err != nil {
 			return it.index, err

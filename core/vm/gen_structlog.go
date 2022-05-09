@@ -5,11 +5,10 @@ package vm
 import (
 	"encoding/json"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/holiman/uint256"
-
-	"github.com/scroll-tech/go-ethereum/common"
-	"github.com/scroll-tech/go-ethereum/common/hexutil"
-	"github.com/scroll-tech/go-ethereum/common/math"
 )
 
 var _ = (*structLogMarshaling)(nil)
@@ -37,10 +36,10 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 	enc.Op = s.Op
 	enc.Gas = math.HexOrDecimal64(s.Gas)
 	enc.GasCost = math.HexOrDecimal64(s.GasCost)
-	enc.Memory = s.Memory.Bytes()
+	enc.Memory = s.Memory
 	enc.MemorySize = s.MemorySize
 	enc.Stack = s.Stack
-	enc.ReturnData = s.ReturnData.Bytes()
+	enc.ReturnData = s.ReturnData
 	enc.Storage = s.Storage
 	enc.Depth = s.Depth
 	enc.RefundCounter = s.RefundCounter
@@ -83,7 +82,7 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		s.GasCost = uint64(*dec.GasCost)
 	}
 	if dec.Memory != nil {
-		s.Memory.Write(*dec.Memory)
+		s.Memory = *dec.Memory
 	}
 	if dec.MemorySize != nil {
 		s.MemorySize = *dec.MemorySize
@@ -92,7 +91,7 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		s.Stack = dec.Stack
 	}
 	if dec.ReturnData != nil {
-		s.ReturnData.Write(*dec.ReturnData)
+		s.ReturnData = *dec.ReturnData
 	}
 	if dec.Storage != nil {
 		s.Storage = dec.Storage

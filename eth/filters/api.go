@@ -25,13 +25,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/scroll-tech/go-ethereum"
-	"github.com/scroll-tech/go-ethereum/common"
-	"github.com/scroll-tech/go-ethereum/common/hexutil"
-	"github.com/scroll-tech/go-ethereum/core/types"
-	"github.com/scroll-tech/go-ethereum/ethdb"
-	"github.com/scroll-tech/go-ethereum/event"
-	"github.com/scroll-tech/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 // filter is a helper struct that holds meta information over the filter type
@@ -275,35 +275,6 @@ func (api *PublicFilterAPI) Logs(ctx context.Context, crit FilterCriteria) (*rpc
 		}
 	}()
 
-	return rpcSub, nil
-}
-
-// NewBlockResult sends the block execution result when a new block is created.
-func (api *PublicFilterAPI) NewBlockResult(ctx context.Context) (*rpc.Subscription, error) {
-	notifier, supported := rpc.NotifierFromContext(ctx)
-	if !supported {
-		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
-	}
-
-	rpcSub := notifier.CreateSubscription()
-
-	go func() {
-		blockResults := make(chan *types.BlockResult)
-		blockResultsSub := api.events.SubscribeBlockResult(blockResults)
-
-		for {
-			select {
-			case blockResult := <-blockResults:
-				notifier.Notify(rpcSub.ID, blockResult)
-			case <-rpcSub.Err():
-				blockResultsSub.Unsubscribe()
-				return
-			case <-notifier.Closed():
-				blockResultsSub.Unsubscribe()
-				return
-			}
-		}
-	}()
 	return rpcSub, nil
 }
 

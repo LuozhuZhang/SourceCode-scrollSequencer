@@ -20,9 +20,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
-
-	"github.com/scroll-tech/go-ethereum/params"
 )
 
 var activators = map[int]func(*JumpTable){

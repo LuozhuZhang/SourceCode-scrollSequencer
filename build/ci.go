@@ -59,10 +59,9 @@ import (
 	"time"
 
 	"github.com/cespare/cp"
-
-	"github.com/scroll-tech/go-ethereum/crypto/signify"
-	"github.com/scroll-tech/go-ethereum/internal/build"
-	"github.com/scroll-tech/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/crypto/signify"
+	"github.com/ethereum/go-ethereum/internal/build"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 var (
@@ -220,7 +219,7 @@ func doInstall(cmdline []string) {
 	// better disable it. This check isn't the best, it should probably
 	// check for something in env instead.
 	if env.CI && runtime.GOARCH == "arm64" {
-		gobuild.Args = append(gobuild.Args, "-p", strconv.Itoa(runtime.NumCPU()))
+		gobuild.Args = append(gobuild.Args, "-p", "1")
 	}
 
 	// We use -trimpath to avoid leaking local paths into the built executables.
@@ -294,7 +293,7 @@ func doTest(cmdline []string) {
 
 	// Test a single package at a time. CI builders are slow
 	// and some tests run into timeouts under load.
-	gotest.Args = append(gotest.Args, "-p", strconv.Itoa(runtime.NumCPU()))
+	gotest.Args = append(gotest.Args, "-p", "1")
 	if *coverage {
 		gotest.Args = append(gotest.Args, "-covermode=atomic", "-cover")
 	}
@@ -1002,7 +1001,7 @@ func doAndroidArchive(cmdline []string) {
 	build.MustRun(tc.Go("mod", "download"))
 
 	// Build the Android archive and Maven resources
-	build.MustRun(gomobileTool("bind", "-ldflags", "-s -w", "--target", "android", "--javapkg", "org.ethereum", "-v", "github.com/scroll-tech/go-ethereum/mobile"))
+	build.MustRun(gomobileTool("bind", "-ldflags", "-s -w", "--target", "android", "--javapkg", "org.ethereum", "-v", "github.com/ethereum/go-ethereum/mobile"))
 
 	if *local {
 		// If we're building locally, copy bundle to build dir and skip Maven
@@ -1131,7 +1130,7 @@ func doXCodeFramework(cmdline []string) {
 	build.MustRun(tc.Go("mod", "download"))
 
 	// Build the iOS XCode framework
-	bind := gomobileTool("bind", "-ldflags", "-s -w", "--target", "ios", "-v", "github.com/scroll-tech/go-ethereum/mobile")
+	bind := gomobileTool("bind", "-ldflags", "-s -w", "--target", "ios", "-v", "github.com/ethereum/go-ethereum/mobile")
 
 	if *local {
 		// If we're building locally, use the build folder and stop afterwards

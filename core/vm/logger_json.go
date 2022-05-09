@@ -22,8 +22,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/scroll-tech/go-ethereum/common"
-	"github.com/scroll-tech/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 )
 
 type JSONLogger struct {
@@ -64,19 +64,15 @@ func (l *JSONLogger) CaptureState(pc uint64, op OpCode, gas, cost uint64, scope 
 		Err:           err,
 	}
 	if l.cfg.EnableMemory {
-		log.Memory.Write(memory.Data())
+		log.Memory = memory.Data()
 	}
 	if !l.cfg.DisableStack {
 		log.Stack = stack.data
 	}
 	if l.cfg.EnableReturnData {
-		log.ReturnData.Write(rData)
+		log.ReturnData = rData
 	}
 	l.encoder.Encode(log)
-}
-
-// CaptureStateAfter for special needs, tracks SSTORE ops and records the storage change.
-func (l *JSONLogger) CaptureStateAfter(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
 }
 
 // CaptureEnd is triggered at end of execution.

@@ -19,26 +19,22 @@ package miner
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
-
-	"github.com/scroll-tech/go-ethereum/common"
-	"github.com/scroll-tech/go-ethereum/common/hexutil"
-	"github.com/scroll-tech/go-ethereum/consensus"
-	"github.com/scroll-tech/go-ethereum/consensus/misc"
-	"github.com/scroll-tech/go-ethereum/core"
-	"github.com/scroll-tech/go-ethereum/core/state"
-	"github.com/scroll-tech/go-ethereum/core/types"
-	"github.com/scroll-tech/go-ethereum/core/vm"
-	"github.com/scroll-tech/go-ethereum/event"
-	"github.com/scroll-tech/go-ethereum/log"
-	"github.com/scroll-tech/go-ethereum/params"
-	"github.com/scroll-tech/go-ethereum/trie"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/misc"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 const (
@@ -92,19 +88,17 @@ type environment struct {
 	tcount    int            // tx count in cycle
 	gasPool   *core.GasPool  // available gas used to pack transactions
 
-	header           *types.Header
-	txs              []*types.Transaction
-	receipts         []*types.Receipt
-	executionResults []*types.ExecutionResult
+	header   *types.Header
+	txs      []*types.Transaction
+	receipts []*types.Receipt
 }
 
 // task contains all information for consensus engine sealing and result submitting.
 type task struct {
-	receipts         []*types.Receipt
-	executionResults []*types.ExecutionResult
-	state            *state.StateDB
-	block            *types.Block
-	createdAt        time.Time
+	receipts  []*types.Receipt
+	state     *state.StateDB
+	block     *types.Block
+	createdAt time.Time
 }
 
 const (
@@ -399,10 +393,10 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			timestamp = time.Now().Unix()
 			commit(false, commitInterruptNewHead)
 
-		case head := <-w.chainHeadCh:
+		/*case head := <-w.chainHeadCh:
 			clearPending(head.Block.NumberU64())
 			timestamp = time.Now().Unix()
-			commit(true, commitInterruptNewHead)
+			commit(false, commitInterruptNewHead)*/
 
 		case <-timer.C:
 			// If mining is running resubmit a new work cycle periodically to pull in
@@ -468,7 +462,6 @@ func (w *worker) mainLoop() {
 		select {
 		case req := <-w.newWorkCh:
 			w.commitNewWork(req.interrupt, req.noempty, req.timestamp)
-			// new block created.
 
 		case ev := <-w.chainSideCh:
 			// Short circuit for duplicate side blocks
@@ -639,18 +632,13 @@ func (w *worker) resultLoop() {
 			}
 			// Different block could share same sealhash, deep copy here to prevent write-write conflict.
 			var (
-				receipts  = make([]*types.Receipt, len(task.receipts))
-				evmTraces = make([]*types.ExecutionResult, len(task.executionResults))
-				logs      []*types.Log
+				receipts = make([]*types.Receipt, len(task.receipts))
+				logs     []*types.Log
 			)
 			for i, taskReceipt := range task.receipts {
 				receipt := new(types.Receipt)
 				receipts[i] = receipt
 				*receipt = *taskReceipt
-
-				evmTrace := new(types.ExecutionResult)
-				evmTraces[i] = evmTrace
-				*evmTrace = *task.executionResults[i]
 
 				// add block location fields
 				receipt.BlockHash = hash
@@ -669,7 +657,7 @@ func (w *worker) resultLoop() {
 				logs = append(logs, receipt.Logs...)
 			}
 			// Commit block and state to database.
-			_, err := w.chain.WriteBlockWithState(block, receipts, logs, evmTraces, task.state, true)
+			_, err := w.chain.WriteBlockWithState(block, receipts, logs, task.state, true)
 			if err != nil {
 				log.Error("Failed writing block to chain", "err", err)
 				continue
@@ -783,33 +771,13 @@ func (w *worker) updateSnapshot() {
 func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address) ([]*types.Log, error) {
 	snap := w.current.state.Snapshot()
 
-	// reset tracer.
-	tracer := w.chain.GetVMConfig().Tracer.(*vm.StructLogger)
-	tracer.Reset()
-	// Get sender's address.
-	from, _ := types.Sender(w.current.signer, tx)
-	sender := &types.AccountProofWrapper{
-		Address:  from,
-		Nonce:    w.current.state.GetNonce(from),
-		Balance:  (*hexutil.Big)(w.current.state.GetBalance(from)),
-		CodeHash: w.current.state.GetCodeHash(from),
-	}
-
 	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &coinbase, w.current.gasPool, w.current.state, w.current.header, tx, &w.current.header.GasUsed, *w.chain.GetVMConfig())
 	if err != nil {
 		w.current.state.RevertToSnapshot(snap)
 		return nil, err
 	}
-
 	w.current.txs = append(w.current.txs, tx)
 	w.current.receipts = append(w.current.receipts, receipt)
-	w.current.executionResults = append(w.current.executionResults, &types.ExecutionResult{
-		Gas:         receipt.GasUsed,
-		Sender:      sender,
-		Failed:      receipt.Status != types.ReceiptStatusSuccessful,
-		ReturnValue: fmt.Sprintf("%x", receipt.ReturnValue),
-		StructLogs:  vm.FormatLogs(tracer.StructLogs()),
-	})
 
 	return receipt.Logs, nil
 }
@@ -1074,7 +1042,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 			interval()
 		}
 		select {
-		case w.taskCh <- &task{receipts: receipts, executionResults: w.current.executionResults, state: s, block: block, createdAt: time.Now()}:
+		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now()}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 			log.Info("Commit new mining work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"uncles", len(uncles), "txs", w.current.tcount,
